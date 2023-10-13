@@ -26,9 +26,9 @@ In effect setting its value to 7.
 In one of my projects, being developed in C, I found myself needing to
 have some configuration values coming from the outside,
 
-As per usual, I don't settled for the "normal" way (command line argument
+As per usual, I didn't settle for the "normal" way (command line argument
 or environment variable) as the need to parse that way would be ...
-something i'd rather not do.
+something I'd rather not do.
 
 So I came up with this tool.
 
