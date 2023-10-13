@@ -21,6 +21,31 @@ In effect setting its value to 7.
 
 (See test.c for an example)
 
+### Strings
+
+Parsing the arguments, if the value is not a valid integer, it is assumed to be a string.
+
+To update/set/override strings, you need to define the space for it:
+```C
+const char CONFIG_STR[] = "placeholder";
+// or set the size
+const char CONFIG_STR[32];
+// or set size and default value
+const char CONFIG_STR[32] = "/tmp";
+
+// can't do pointers tho...
+```
+
+And the command interface is the same
+```bash
+elfedit2 <your-elf-file> CONFIG_STR=/tmp/my-program
+```
+
+The tool will complain if the provided string would not fit (including null terminator)
+and will also pad the remaining of the space with zeroes.
+
+(See test-string.c/sh for examples)
+
 ## Why ??
 
 In one of my projects, being developed in C, I found myself needing to

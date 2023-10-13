@@ -3,21 +3,28 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <ctype.h>
 
 #include <elf.h>
+
+#include <sys/param.h>
 
 #define NAME_SIZE 128
 #define NAME_STR_LEN NAME_SIZE-1
 struct arg {
 	char name[NAME_SIZE];	// should be enough
-	long value;
-	int name_len;
+	int is_string;
+	union {
+		long value;
+		char *str;	// pointer to string on argv
+	};
 };
 
 static int set1(FILE*, Elf64_Sym *sym, Elf64_Shdr *thdr, long value);
 static int set2(FILE*, Elf64_Sym *sym, Elf64_Shdr *thdr, long value);
 static int set4(FILE*, Elf64_Sym *sym, Elf64_Shdr *thdr, long value);
 static int set8(FILE*, Elf64_Sym *sym, Elf64_Shdr *thdr, long value);
+static int set_string(FILE*, Elf64_Sym *sym, Elf64_Shdr *thdr, char *value);
 
 int main(int argc, char **argv)
 {
@@ -61,16 +68,21 @@ int main(int argc, char **argv)
 		}
 		memcpy(c_arg->name, argv[i], name_len);
 		c_arg->name[name_len] = 0;
-		c_arg->name_len = name_len;
 		char *p;
 		long value = strtol(eq+1, &p, 0);
 		if(*p != 0)
 		{
-			fprintf(stderr, "Invalid integer value: '%s'\n", eq+1);
-			return 2;
+			// not an integer, it's a string
+			//fprintf(stderr, "Arg is %s="%s"\n", c_arg->name, c_arg->str);
+			c_arg->str = eq+1;
+			c_arg->is_string = 1;
 		}
-		c_arg->value = value;
-		//fprintf(stderr, "Arg is '%s'=%ld\n", c_arg->name, c_arg->value);
+		else
+		{
+			//fprintf(stderr, "Arg is %s=%ld\n", c_arg->name, c_arg->value);
+			c_arg->value = value;
+			c_arg->is_string = 0;
+		}
 		c_arg++;
 	}
 
@@ -181,6 +193,22 @@ int main(int argc, char **argv)
 		if(!c_arg)
 			continue;
 
+		// check string
+		if(c_arg->is_string)
+		{
+			// do string
+			if(set_string(file, &sym, sec_hdrs+sym.st_shndx, c_arg->str))
+			{
+				fprintf(stderr, "Failed to set value (%s)\n", name);
+				return 1;
+			}
+
+			// either way
+			continue;
+		}
+
+		// else, it's an integer
+
 		// set value
 		int (*setter)(FILE*, Elf64_Sym*, Elf64_Shdr*, long);
 		switch(sym.st_size)
@@ -198,7 +226,7 @@ int main(int argc, char **argv)
 			setter = set8;
 			break;
 		default:
-			fprintf(stderr, "Unhandled value size: %d (%s)\n", sym.st_size, name);
+			fprintf(stderr, "Unhandled integer size: %d (%s)\n", sym.st_size, name);
 			return 1;
 		}
 		if(setter(file, &sym, sec_hdrs+sym.st_shndx, c_arg->value))
@@ -268,4 +296,42 @@ int set8(FILE*file, Elf64_Sym *sym, Elf64_Shdr*shdr, long lval)
 {
 	int64_t value = (int64_t)lval;
 	return _set(file, sym, shdr, &value, 8);
+}
+
+int set_string(FILE* file, Elf64_Sym *sym, Elf64_Shdr *shdr, char* str)
+{
+	int slen = strlen(str);
+	int dlen = slen+1;
+	if(dlen > sym->st_size)
+	{
+		fprintf(stderr, "String is too long (%d > %d)\n", dlen+sym->st_size);
+		return 1;
+	}
+
+	if(fseek(file, (long)(shdr->sh_offset + sym->st_value - shdr->sh_addr), SEEK_SET))
+	{
+		fprintf(stderr, "Failed to seek file\n");
+		return 1;
+	}
+
+	if(fwrite(str, 1, dlen, file) != dlen)
+	{
+		fprintf(stderr, "Failed to write string\n");
+		return 1;
+	}
+	// fill the rest with zeros
+	int left = sym->st_size - dlen;
+	char zeros[8] = {0,0,0,0, 0,0,0,0};
+	while(left)
+	{
+		int to_write = MIN(left, 8);
+		if(fwrite(zeros, 1, to_write, file) != to_write)
+		{
+			fprintf(stderr, "Failed to pad string\n");
+			// just ignore it?
+			return 0;
+		}
+		left -= to_write;
+	}
+	return 0;
 }
